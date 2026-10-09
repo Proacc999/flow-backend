@@ -61,7 +61,7 @@ Content-Type: application/json
 {
   "name": "My first flow",
   "categories": ["OTHER"],
-  "wabaNumber": "919251006460",
+  "wabaNumber": "15550001111",
   "flowJson": {
     "version": "7.1",
     "screens": [
@@ -105,7 +105,7 @@ newest first in the shape expected by the `WhatsappFlows` React table. Limit
 the request to one configured account with:
 
 ```text
-GET /api/whatsapp/getAllFlows?wabaNumber=919251006460
+GET /api/whatsapp/getAllFlows?wabaNumber=15550001111
 ```
 
 The current configuration contains one WABA, so a Meta retrieval error fails

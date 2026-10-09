@@ -23,7 +23,7 @@ function configureMeta() {
   process.env.META_GRAPH_API_VERSION = "v26.0";
   process.env.META_ACCESS_TOKEN = "test-token";
   process.env.META_WABA_ACCOUNTS_JSON = JSON.stringify({
-    "919251006460": "1368265205374974",
+    "15550001111": "100000000000001",
   });
 }
 
@@ -89,7 +89,7 @@ test("creates a draft with inline flow_json in one Meta request", async () => {
     .send({
       name: "Test flow",
       categories: ["OTHER"],
-      wabaNumber: "919251006460",
+      wabaNumber: "15550001111",
       flowJson: {
         version: "7.1",
         screens: [{ id: "WELCOME", layout: { type: "SingleColumnLayout", children: [] } }],
@@ -106,7 +106,7 @@ test("creates a draft with inline flow_json in one Meta request", async () => {
   assert.equal(calls.length, 1);
   assert.equal(
     calls[0].url,
-    "https://graph.example.test/v26.0/1368265205374974/flows",
+    "https://graph.example.test/v26.0/100000000000001/flows",
   );
   assert.equal(calls[0].options.headers["Content-Type"], "application/json");
 
@@ -139,7 +139,7 @@ test("returns Meta validation errors while retaining the created Flow ID", async
     .send({
       name: "Invalid test flow",
       categories: ["SURVEY"],
-      wabaNumber: "919251006460",
+      wabaNumber: "15550001111",
       flowJson: { version: "7.1", screens: [{ id: "SCREEN_ONE" }] },
     });
 
@@ -175,7 +175,7 @@ test("rejects an unmapped mobile number before calling Meta", async () => {
 test("returns locally saved flows in newest-first order", async () => {
   configureMeta();
   global.fetch = async (url) => {
-    assert.match(url, /\/1368265205374974\/flows\?/);
+    assert.match(url, /\/100000000000001\/flows\?/);
     return jsonResponse({
       data: [
         {
@@ -198,8 +198,8 @@ test("returns locally saved flows in newest-first order", async () => {
           metaFlowId: "flow-2",
           name: "Second flow",
           categories: ["SURVEY"],
-          wabaId: "1368265205374974",
-          wabaNumber: "919251006460",
+          wabaId: "100000000000001",
+          wabaNumber: "15550001111",
           status: "DRAFT",
           valid: true,
           validationErrors: [],
@@ -235,8 +235,8 @@ test("returns a locally saved Flow JSON for preview", async () => {
     metaFlowId,
     name: "Local preview",
     categories: ["OTHER"],
-    wabaId: "1368265205374974",
-    wabaNumber: "919251006460",
+    wabaId: "100000000000001",
+    wabaNumber: "15550001111",
     status: "DRAFT",
     valid: true,
     validationErrors: [],
@@ -269,8 +269,8 @@ test("downloads missing Flow JSON from Meta and caches it in MongoDB", async () 
     metaFlowId: "meta-only-flow",
     name: "Meta preview",
     categories: ["SURVEY"],
-    wabaId: "1368265205374974",
-    wabaNumber: "919251006460",
+    wabaId: "100000000000001",
+    wabaNumber: "15550001111",
     status: "DRAFT",
     valid: true,
     validationErrors: [],
@@ -324,8 +324,8 @@ test("publishes a Flow on Meta and updates its MongoDB status", async () => {
     metaFlowId: "draft-to-publish",
     name: "Publish me",
     categories: ["OTHER"],
-    wabaId: "1368265205374974",
-    wabaNumber: "919251006460",
+    wabaId: "100000000000001",
+    wabaNumber: "15550001111",
     status: "DRAFT",
     valid: true,
     validationErrors: [],
@@ -361,7 +361,7 @@ test("deletes a draft Flow from Meta and MongoDB", async () => {
   configureMeta();
   const savedFlow = {
     metaFlowId: "draft-to-delete",
-    wabaNumber: "919251006460",
+    wabaNumber: "15550001111",
     status: "DRAFT",
   };
   let deletedFilter = null;
@@ -394,7 +394,7 @@ test("does not delete a published Flow", async () => {
   let metaWasCalled = false;
   Flow.findOne = async () => ({
     metaFlowId: "published-flow",
-    wabaNumber: "919251006460",
+    wabaNumber: "15550001111",
     status: "PUBLISHED",
   });
   global.fetch = async () => {
@@ -429,7 +429,7 @@ test("exports the saved Flow JSON as a flow-name.json attachment", async () => {
   Flow.findOne = async () => ({
     metaFlowId: "export-flow",
     name: "Customer: Survey",
-    wabaNumber: "919251006460",
+    wabaNumber: "15550001111",
     flowJson,
   });
 
