@@ -4,6 +4,9 @@ const {
   getMetaFlowJson,
   listMetaFlows,
   publishMetaFlow,
+  sendMetaFlowMessage,
+  updateMetaFlowJson,
+  updateMetaFlowMetadata,
 } = require("../services/meta-flow.service");
 const { Flow, toClientFlow } = require("../models/flow.model");
 
@@ -249,6 +252,126 @@ async function deleteFlow(req, res, next) {
   }
 }
 
+async function sendFlow(req, res, next) {
+  try {
+    const metaFlowId = String(req.params.flowId);
+    const savedFlow = await findSavedFlow(metaFlowId);
+    const isPublished = savedFlow.status === "PUBLISHED";
+
+    if (!isPublished && savedFlow.status !== "DRAFT") {
+      const error = new Error(
+        `Flows with status ${savedFlow.status} cannot be sent.`,
+      );
+      error.code = "FLOW_NOT_SENDABLE";
+      error.statusCode = 409;
+      throw error;
+    }
+
+    const { recipientNumber, screenId } = req.validatedBody;
+    const bodyText = isPublished
+      ? req.validatedBody.bodyText
+      : req.validatedBody.bodyText || "This is a test message to try your Flow.";
+    const ctaText = isPublished
+      ? req.validatedBody.ctaText
+      : req.validatedBody.ctaText || "Start testing your Flow";
+
+    if (isPublished && (!bodyText || !ctaText)) {
+      const error = new Error(
+        "Message body and CTA button text are required for a published Flow.",
+      );
+      error.code = "SEND_FIELDS_REQUIRED";
+      error.statusCode = 400;
+      throw error;
+    }
+
+    const result = await sendMetaFlowMessage({
+      flowId: metaFlowId,
+      flowName: savedFlow.name,
+      wabaNumber: savedFlow.wabaNumber,
+      recipientNumber,
+      bodyText,
+      ctaText,
+      mode: isPublished ? "published" : "draft",
+      screenId: screenId || null,
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: "Flow message sent successfully.",
+      data: result,
+    });
+  } catch (error) {
+    next(error);
+  }
+}
+
+async function updateFlow(req, res, next) {
+  const metaFlowId = String(req.params.flowId);
+  let jsonUpdatedOnMeta = false;
+
+  try {
+    const savedFlow = await findSavedFlow(metaFlowId);
+    if (savedFlow.status !== "DRAFT") {
+      const error = new Error(
+        `Only DRAFT flows can be edited. This Flow is ${savedFlow.status}.`,
+      );
+      error.code = "FLOW_NOT_EDITABLE";
+      error.statusCode = 409;
+      throw error;
+    }
+
+    const { name, categories, flowJson } = req.validatedBody;
+    let validationResult = {
+      valid: savedFlow.valid,
+      validationErrors: savedFlow.validationErrors || [],
+    };
+
+    // Upload JSON first. If it is rejected, metadata remains untouched.
+    if (flowJson !== undefined) {
+      validationResult = await updateMetaFlowJson({
+        flowId: metaFlowId,
+        wabaNumber: savedFlow.wabaNumber,
+        flowJson,
+      });
+      jsonUpdatedOnMeta = true;
+    }
+
+    if (name !== undefined || categories !== undefined) {
+      await updateMetaFlowMetadata({
+        flowId: metaFlowId,
+        wabaNumber: savedFlow.wabaNumber,
+        name,
+        categories,
+      });
+    }
+
+    if (name !== undefined) savedFlow.name = name;
+    if (categories !== undefined) savedFlow.categories = categories;
+    if (flowJson !== undefined) {
+      savedFlow.flowJson = flowJson;
+      savedFlow.jsonVersion = flowJson.version || savedFlow.jsonVersion;
+      savedFlow.valid = validationResult.valid;
+      savedFlow.validationErrors = validationResult.validationErrors;
+    }
+    await savedFlow.save();
+
+    return res.json({
+      success: true,
+      message: validationResult.valid
+        ? "Flow updated successfully."
+        : "Flow updated, but its JSON has validation errors.",
+      flow: toClientFlow(savedFlow),
+    });
+  } catch (error) {
+    if (jsonUpdatedOnMeta) {
+      error.code = "META_PARTIAL_UPDATE";
+      error.statusCode = 502;
+      error.message = `Flow JSON was updated on Meta, but the remaining update failed: ${error.message}`;
+    }
+    next(error);
+  }
+}
+
 module.exports = {
   createFlow,
   deleteFlow,
@@ -256,4 +379,6 @@ module.exports = {
   getAllFlows,
   getFlowDetails,
   publishFlow,
+  sendFlow,
+  updateFlow,
 };

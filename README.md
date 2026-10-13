@@ -121,6 +121,27 @@ GET /api/whatsapp/flows/:flowId/export
 
 ## Publish and delete Flows
 
+Edit a draft Flow's metadata, Flow JSON, or both in one application request:
+
+```text
+PATCH /api/whatsapp/flows/:flowId
+```
+
+```json
+{
+  "name": "Updated Flow name",
+  "categories": ["SURVEY"],
+  "flowJson": {
+    "version": "7.1",
+    "screens": [{ "id": "WELCOME", "layout": { "children": [] } }]
+  }
+}
+```
+
+Every field is optional, but at least one must be supplied. Internally, Flow
+JSON is uploaded to Meta as multipart form-data and metadata is updated through
+Meta's Flow endpoint. Published Flows cannot be edited.
+
 Publish a draft Flow on Meta and update its MongoDB status:
 
 ```text
@@ -134,6 +155,28 @@ DELETE /api/whatsapp/flows/:flowId
 ```
 
 Meta does not allow a published Flow to be edited or deleted.
+
+## Send a Flow message
+
+Send a draft test Flow or a published Flow as a WhatsApp interactive message:
+
+```text
+POST /api/whatsapp/flows/:flowId/sendflowtemplate
+Content-Type: application/json
+```
+
+```json
+{
+  "recipientNumber": "15550002222",
+  "bodyText": "Please complete this survey.",
+  "ctaText": "Start survey",
+  "screenId": null
+}
+```
+
+Configure the sending phone number ID inside the matching account in
+`META_WABA_ACCOUNTS_JSON`. The server generates a recognizable unique token in
+the form `flowname_randomhex`; clients cannot supply their own token.
 
 ## Test
 

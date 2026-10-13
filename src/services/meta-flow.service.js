@@ -3,6 +3,7 @@ const {
   resolveMetaAccount,
   getMetaAccounts,
 } = require("../config/env");
+const crypto = require("node:crypto");
 
 class MetaApiError extends Error {
   constructor(message, { statusCode = 502, metaError, metaFlowId } = {}) {
@@ -117,6 +118,82 @@ async function createMetaFlow({ name, categories, wabaNumber, flowJson }) {
   };
 }
 
+async function updateMetaFlowJson({ flowId, wabaNumber, flowJson }) {
+  const serializedFlow = JSON.stringify(flowJson);
+  if (Buffer.byteLength(serializedFlow, "utf8") > 10 * 1024 * 1024) {
+    throw new MetaApiError("The generated flow.json exceeds Meta's 10 MB limit.", {
+      statusCode: 400,
+      metaFlowId: String(flowId),
+    });
+  }
+
+  const { graphBaseUrl, graphApiVersion } = getConfig();
+  const { accessToken } = resolveMetaAccount(wabaNumber);
+  const form = new FormData();
+  form.append(
+    "file",
+    new Blob([serializedFlow], { type: "application/json" }),
+    "flow.json",
+  );
+  form.append("name", "flow.json");
+  form.append("asset_type", "FLOW_JSON");
+
+  const response = await callMeta(
+    `${graphBaseUrl}/${graphApiVersion}/${encodeURIComponent(flowId)}/assets`,
+    {
+      method: "POST",
+      headers: { Authorization: `Bearer ${accessToken}` },
+      body: form,
+    },
+    String(flowId),
+  );
+
+  if (response.success !== true) {
+    throw new MetaApiError("Meta did not confirm the Flow JSON update.", {
+      metaError: response,
+      metaFlowId: String(flowId),
+    });
+  }
+
+  const validationErrors = response.validation_errors || [];
+  return { validationErrors, valid: validationErrors.length === 0 };
+}
+
+async function updateMetaFlowMetadata({
+  flowId,
+  wabaNumber,
+  name,
+  categories,
+}) {
+  const { graphBaseUrl, graphApiVersion } = getConfig();
+  const { accessToken } = resolveMetaAccount(wabaNumber);
+  const metadata = {};
+  if (name !== undefined) metadata.name = name;
+  if (categories !== undefined) metadata.categories = categories;
+
+  const response = await callMeta(
+    `${graphBaseUrl}/${graphApiVersion}/${encodeURIComponent(flowId)}`,
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(metadata),
+    },
+    String(flowId),
+  );
+
+  if (response.success !== true) {
+    throw new MetaApiError("Meta did not confirm the Flow metadata update.", {
+      metaError: response,
+      metaFlowId: String(flowId),
+    });
+  }
+
+  return { success: true };
+}
+
 async function getMetaFlowJson({ flowId, wabaNumber }) {
   const { graphBaseUrl, graphApiVersion } = getConfig();
   const { accessToken } = resolveMetaAccount(wabaNumber);
@@ -199,6 +276,91 @@ async function deleteMetaFlow({ flowId, wabaNumber }) {
   return { success: true };
 }
 
+function createFlowToken(flowName) {
+  const recognizableName = String(flowName || "flow")
+    .toLowerCase()
+    .replace(/[^a-z0-9_-]+/g, "_")
+    .replace(/^_+|_+$/g, "")
+    .slice(0, 48) || "flow";
+  return `${recognizableName}_${crypto.randomBytes(8).toString("hex")}`;
+}
+
+async function sendMetaFlowMessage({
+  flowId,
+  flowName,
+  wabaNumber,
+  recipientNumber,
+  bodyText,
+  ctaText,
+  mode,
+  screenId,
+}) {
+  const { graphBaseUrl, graphApiVersion } = getConfig();
+  const { accessToken, phoneNumberId } = resolveMetaAccount(wabaNumber);
+
+  if (!phoneNumberId) {
+    const error = new Error(
+      `No Meta phone number ID is configured for WhatsApp number ${wabaNumber}.`,
+    );
+    error.code = "PHONE_NUMBER_ID_NOT_CONFIGURED";
+    error.statusCode = 500;
+    throw error;
+  }
+
+  const flowToken = createFlowToken(flowName);
+  const parameters = {
+    flow_message_version: "3",
+    flow_token: flowToken,
+    flow_id: String(flowId),
+    flow_cta: ctaText,
+    mode,
+    flow_action: "navigate",
+  };
+
+  if (screenId) {
+    parameters.flow_action_payload = { screen: screenId };
+  }
+
+  const body = {
+    messaging_product: "whatsapp",
+    recipient_type: "individual",
+    to: recipientNumber,
+    type: "interactive",
+    interactive: {
+      type: "flow",
+      body: { text: bodyText },
+      action: { name: "flow", parameters },
+    },
+  };
+
+  const response = await callMeta(
+    `${graphBaseUrl}/${graphApiVersion}/${encodeURIComponent(phoneNumberId)}/messages`,
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(body),
+    },
+    String(flowId),
+  );
+
+  const messageId = response.messages?.[0]?.id;
+  if (!messageId) {
+    throw new MetaApiError("Meta did not return a message ID.", {
+      metaError: response,
+      metaFlowId: String(flowId),
+    });
+  }
+
+  return {
+    messageId: String(messageId),
+    flowToken,
+    recipientWaId: response.contacts?.[0]?.wa_id || recipientNumber,
+  };
+}
+
 async function listMetaFlows({ wabaNumber } = {}) {
   const { graphBaseUrl, graphApiVersion } = getConfig();
   const accounts = wabaNumber
@@ -260,5 +422,8 @@ module.exports = {
   getMetaFlowJson,
   listMetaFlows,
   publishMetaFlow,
+  sendMetaFlowMessage,
+  updateMetaFlowJson,
+  updateMetaFlowMetadata,
   MetaApiError,
 };

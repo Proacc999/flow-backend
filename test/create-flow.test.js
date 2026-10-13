@@ -23,7 +23,10 @@ function configureMeta() {
   process.env.META_GRAPH_API_VERSION = "v26.0";
   process.env.META_ACCESS_TOKEN = "test-token";
   process.env.META_WABA_ACCOUNTS_JSON = JSON.stringify({
-    "15550001111": "100000000000001",
+    "15550001111": {
+      wabaId: "100000000000001",
+      phoneNumberId: "100000000000002",
+    },
   });
 }
 
@@ -444,4 +447,226 @@ test("exports the saved Flow JSON as a flow-name.json attachment", async () => {
     /^attachment; filename="Customer_ Survey\.json";/,
   );
   assert.deepEqual(response.body, flowJson);
+});
+
+test("sends a published Flow with a recognizable random flow token", async () => {
+  configureMeta();
+  Flow.findOne = async () => ({
+    metaFlowId: "1254619368752741",
+    name: "testdocall2",
+    wabaNumber: "15550001111",
+    status: "PUBLISHED",
+  });
+  let sentPayload;
+  global.fetch = async (url, options) => {
+    assert.equal(
+      url,
+      "https://graph.example.test/v26.0/100000000000002/messages",
+    );
+    assert.equal(options.method, "POST");
+    sentPayload = JSON.parse(options.body);
+    return jsonResponse({
+      messaging_product: "whatsapp",
+      contacts: [{ input: "919874563210", wa_id: "919874563210" }],
+      messages: [{ id: "wamid.test-message" }],
+    });
+  };
+
+  const response = await request(createApp())
+    .post("/api/whatsapp/flows/1254619368752741/sendflowtemplate")
+    .send({
+      recipientNumber: "+91 98745 63210",
+      bodyText: "this is test to send flow",
+      ctaText: "start survey",
+      screenId: null,
+    });
+
+  assert.equal(response.status, 200);
+  assert.equal(response.body.success, true);
+  assert.equal(response.body.data.messageId, "wamid.test-message");
+  assert.match(response.body.data.flowToken, /^testdocall2_[a-f0-9]{16}$/);
+  assert.equal(sentPayload.messaging_product, "whatsapp");
+  assert.equal(sentPayload.recipient_type, "individual");
+  assert.equal(sentPayload.to, "919874563210");
+  assert.equal(sentPayload.type, "interactive");
+  assert.equal(sentPayload.interactive.type, "flow");
+  assert.equal(
+    sentPayload.interactive.body.text,
+    "this is test to send flow",
+  );
+  assert.deepEqual(sentPayload.interactive.action.parameters, {
+    flow_message_version: "3",
+    flow_token: response.body.data.flowToken,
+    flow_id: "1254619368752741",
+    flow_cta: "start survey",
+    mode: "published",
+    flow_action: "navigate",
+  });
+});
+
+test("requires message body and CTA text for a published Flow", async () => {
+  configureMeta();
+  let metaWasCalled = false;
+  Flow.findOne = async () => ({
+    metaFlowId: "published-send-validation",
+    name: "Published Flow",
+    wabaNumber: "15550001111",
+    status: "PUBLISHED",
+  });
+  global.fetch = async () => {
+    metaWasCalled = true;
+    return jsonResponse({});
+  };
+
+  const response = await request(createApp())
+    .post(
+      "/api/whatsapp/flows/published-send-validation/sendflowtemplate",
+    )
+    .send({ recipientNumber: "919874563210" });
+
+  assert.equal(response.status, 400);
+  assert.equal(response.body.error.code, "SEND_FIELDS_REQUIRED");
+  assert.equal(metaWasCalled, false);
+});
+
+function makeEditableFlow(overrides = {}) {
+  return {
+    _id: "507f1f77bcf86cd799439099",
+    metaFlowId: "editable-flow",
+    name: "Original name",
+    categories: ["OTHER"],
+    wabaId: "100000000000001",
+    wabaNumber: "15550001111",
+    status: "DRAFT",
+    valid: true,
+    validationErrors: [],
+    flowJson: { version: "7.1", screens: [{ id: "OLD" }] },
+    jsonVersion: "7.1",
+    createdAt: new Date("2026-10-12T08:00:00.000Z"),
+    updatedAt: new Date("2026-10-12T08:00:00.000Z"),
+    save: async () => {},
+    ...overrides,
+  };
+}
+
+test("edits only Flow metadata through the single edit API", async () => {
+  configureMeta();
+  const savedFlow = makeEditableFlow();
+  Flow.findOne = async () => savedFlow;
+  const calls = [];
+  global.fetch = async (url, options) => {
+    calls.push({ url, options });
+    return jsonResponse({ success: true });
+  };
+
+  const response = await request(createApp())
+    .patch("/api/whatsapp/flows/editable-flow")
+    .send({ name: "Renamed Flow", categories: ["SURVEY"] });
+
+  assert.equal(response.status, 200);
+  assert.equal(response.body.success, true);
+  assert.equal(calls.length, 1);
+  assert.equal(
+    calls[0].url,
+    "https://graph.example.test/v26.0/editable-flow",
+  );
+  assert.equal(calls[0].options.method, "POST");
+  assert.deepEqual(JSON.parse(calls[0].options.body), {
+    name: "Renamed Flow",
+    categories: ["SURVEY"],
+  });
+  assert.equal(savedFlow.name, "Renamed Flow");
+  assert.deepEqual(savedFlow.categories, ["SURVEY"]);
+  assert.equal(savedFlow.flowJson.screens[0].id, "OLD");
+});
+
+test("edits only Flow JSON using Meta multipart upload", async () => {
+  configureMeta();
+  const savedFlow = makeEditableFlow();
+  const nextFlowJson = {
+    version: "7.1",
+    screens: [{ id: "UPDATED", layout: { children: [] } }],
+  };
+  Flow.findOne = async () => savedFlow;
+  let uploadedForm;
+  global.fetch = async (url, options) => {
+    assert.equal(
+      url,
+      "https://graph.example.test/v26.0/editable-flow/assets",
+    );
+    assert.equal(options.method, "POST");
+    uploadedForm = options.body;
+    return jsonResponse({ success: true, validation_errors: [] });
+  };
+
+  const response = await request(createApp())
+    .patch("/api/whatsapp/flows/editable-flow")
+    .send({ flowJson: nextFlowJson });
+
+  assert.equal(response.status, 200);
+  assert.equal(response.body.success, true);
+  assert.ok(uploadedForm instanceof FormData);
+  assert.equal(uploadedForm.get("name"), "flow.json");
+  assert.equal(uploadedForm.get("asset_type"), "FLOW_JSON");
+  assert.deepEqual(
+    JSON.parse(await uploadedForm.get("file").text()),
+    nextFlowJson,
+  );
+  assert.deepEqual(savedFlow.flowJson, nextFlowJson);
+  assert.equal(savedFlow.name, "Original name");
+});
+
+test("edits Flow JSON and metadata together through one edit API request", async () => {
+  configureMeta();
+  const savedFlow = makeEditableFlow();
+  const nextFlowJson = {
+    version: "7.2",
+    screens: [{ id: "BOTH_UPDATED", layout: { children: [] } }],
+  };
+  Flow.findOne = async () => savedFlow;
+  const calls = [];
+  global.fetch = async (url, options) => {
+    calls.push({ url, options });
+    return jsonResponse(
+      url.endsWith("/assets")
+        ? { success: true, validation_errors: [] }
+        : { success: true },
+    );
+  };
+
+  const response = await request(createApp())
+    .patch("/api/whatsapp/flows/editable-flow")
+    .send({
+      name: "Everything Updated",
+      categories: ["LEAD_GENERATION"],
+      flowJson: nextFlowJson,
+    });
+
+  assert.equal(response.status, 200);
+  assert.equal(response.body.success, true);
+  assert.equal(calls.length, 2);
+  assert.match(calls[0].url, /\/editable-flow\/assets$/);
+  assert.match(calls[1].url, /\/editable-flow$/);
+  assert.equal(savedFlow.name, "Everything Updated");
+  assert.deepEqual(savedFlow.categories, ["LEAD_GENERATION"]);
+  assert.deepEqual(savedFlow.flowJson, nextFlowJson);
+  assert.equal(savedFlow.jsonVersion, "7.2");
+});
+
+test("rejects edits to a published Flow before calling Meta", async () => {
+  configureMeta();
+  let metaWasCalled = false;
+  Flow.findOne = async () => makeEditableFlow({ status: "PUBLISHED" });
+  global.fetch = async () => {
+    metaWasCalled = true;
+    return jsonResponse({ success: true });
+  };
+
+  const response = await request(createApp())
+    .patch("/api/whatsapp/flows/editable-flow")
+    .send({ name: "Should fail" });
+
+  assert.equal(response.status, 409);
+  assert.equal(response.body.error.code, "FLOW_NOT_EDITABLE");
+  assert.equal(metaWasCalled, false);
 });

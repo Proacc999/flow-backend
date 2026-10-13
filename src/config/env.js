@@ -33,6 +33,8 @@ function resolveMetaAccount(wabaNumber) {
       : configuredAccount?.wabaId || process.env.META_WABA_ID;
   const accessToken =
     configuredAccount?.accessToken || process.env.META_ACCESS_TOKEN;
+  const phoneNumberId =
+    configuredAccount?.phoneNumberId || process.env.META_PHONE_NUMBER_ID;
 
   if (!wabaId) {
     const error = new Error(
@@ -50,7 +52,11 @@ function resolveMetaAccount(wabaNumber) {
     throw error;
   }
 
-  return { wabaId: String(wabaId), accessToken };
+  return {
+    wabaId: String(wabaId),
+    accessToken,
+    phoneNumberId: phoneNumberId ? String(phoneNumberId) : null,
+  };
 }
 
 function getMetaAccounts() {
@@ -65,6 +71,10 @@ function getMetaAccounts() {
       ),
       accessToken:
         (typeof account === "object" && account?.accessToken) || defaultToken,
+      phoneNumberId:
+        (typeof account === "object" && account?.phoneNumberId) ||
+        process.env.META_PHONE_NUMBER_ID ||
+        null,
     }),
   );
 
